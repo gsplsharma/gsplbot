@@ -2,8 +2,6 @@ import os
 import requests
 import logging
 import re
-import threading
-import time
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -17,11 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 os.environ['MAIN_BOT_TOKEN'] = '5663514171:AAFo7X3xzuwEYkdQUDFCAc3zzO0L7rzGi5U'
-os.environ['REPORT_BOT_TOKEN'] = '5941264407:AAHSEjZJMeRB9DpCQ5D7Ba3O_3MIleJRvkQ'
 os.environ['OWNER_CHAT_ID'] = '1626828965'
 
 MAIN_BOT_TOKEN = os.environ.get('MAIN_BOT_TOKEN')
-REPORT_BOT_TOKEN = os.environ.get('REPORT_BOT_TOKEN')
 OWNER_CHAT_ID = os.environ.get('OWNER_CHAT_ID')
 
 # Store user data
@@ -85,57 +81,60 @@ PRODUCTS_DATA = {
     }
 }
 
-class GSPLDualBot:
+class GSPLBot:
     def __init__(self):
-        # Initialize both bots
-        self.main_app = Application.builder().token(MAIN_BOT_TOKEN).build()
-        self.report_app = Application.builder().token(REPORT_BOT_TOKEN).build()
-        
+        self.app = Application.builder().token(MAIN_BOT_TOKEN).build()
         self.setup_handlers()
-        logger.info("🤖 GSPL Dual Bot System Initialized")
+        logger.info("🤖 GSPL Bot with Report Features Initialized")
 
     def setup_handlers(self):
         # Main Bot Handlers
-        self.main_app.add_handler(CommandHandler("start", self.main_start))
-        self.main_app.add_handler(CommandHandler("status", self.status))
-        self.main_app.add_handler(CallbackQueryHandler(self.main_button_handler))
-        self.main_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.main_message_handler))
+        self.app.add_handler(CommandHandler("start", self.main_start))
+        self.app.add_handler(CommandHandler("status", self.status))
+        self.app.add_handler(CommandHandler("report", self.show_report))  # Report command
+        self.app.add_handler(CommandHandler("users", self.show_users))
+        self.app.add_handler(CommandHandler("stats", self.show_stats))
+        self.app.add_handler(CommandHandler("myid", self.get_my_id))
         
-        # Report Bot Handlers (Secure - Owner Only)
-        self.report_app.add_handler(CommandHandler("start", self.report_start))
-        self.report_app.add_handler(CommandHandler("users", self.show_users_secure))
-        self.report_app.add_handler(CommandHandler("myid", self.get_my_id_secure))
-        self.report_app.add_handler(CommandHandler("stats", self.show_stats_secure))
+        # Callback query handler
+        self.app.add_handler(CallbackQueryHandler(self.main_button_handler))
+        
+        # Message handler
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.main_message_handler))
 
-    # 🔒 SECURE REPORT BOT FUNCTIONS
-    async def get_my_id_secure(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.message.chat.id) != OWNER_CHAT_ID:
-            await update.message.reply_text("❌ Access Denied")
-            return
+    # 🔒 REPORT FUNCTIONS
+    async def get_my_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.message.chat.id
         await update.message.reply_text(f"🆔 Your Chat ID: `{chat_id}`", parse_mode='Markdown')
 
-    async def report_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.message.chat.id) != OWNER_CHAT_ID:
-            await update.message.reply_text("❌ Access Denied")
+    async def show_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        
+        # Check if user is owner
+        if str(user_id) != OWNER_CHAT_ID:
+            await update.message.reply_text("❌ Access Denied - Owner Only")
             return
         
         keyboard = [
             [InlineKeyboardButton("👥 Registered Users", callback_data="report_users")],
             [InlineKeyboardButton("📊 Statistics", callback_data="report_stats")],
-            [InlineKeyboardButton("🆔 My ID", callback_data="report_myid")]
+            [InlineKeyboardButton("🆔 My ID", callback_data="report_myid")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(
-            "🔒 **Secure Report Bot**\n\nOwner-only commands:",
+            "🔒 **Admin Report Panel**\n\nChoose an option:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
 
-    async def show_users_secure(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.message.chat.id) != OWNER_CHAT_ID:
-            await update.message.reply_text("❌ Access Denied")
+    async def show_users(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        
+        # Check if user is owner
+        if str(user_id) != OWNER_CHAT_ID:
+            await update.message.reply_text("❌ Access Denied - Owner Only")
             return
         
         if not user_sessions:
@@ -156,11 +155,18 @@ class GSPLDualBot:
                 user_list += "─" * 30 + "\n"
         
         user_list = f"📊 **Total Registered Users:** {user_count}\n\n" + user_list
+        
+        if len(user_list) > 4096:  # Telegram message limit
+            user_list = user_list[:4000] + "\n\n... (message too long, showing first part)"
+        
         await update.message.reply_text(user_list, parse_mode='Markdown')
 
-    async def show_stats_secure(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.message.chat.id) != OWNER_CHAT_ID:
-            await update.message.reply_text("❌ Access Denied")
+    async def show_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        
+        # Check if user is owner
+        if str(user_id) != OWNER_CHAT_ID:
+            await update.message.reply_text("❌ Access Denied - Owner Only")
             return
         
         total_users = len(user_sessions)
@@ -173,18 +179,20 @@ class GSPLDualBot:
 ✅ **Registered Users:** {registered_users}
 🎯 **Active Users:** {active_users}
 
-📈 **User Engagement:**
+📈 **Recent Activity:**
 """
         
-        for user_id, data in user_sessions.items():
-            if data.get('interaction_count', 0) > 0:
-                stats_text += f"• {data.get('telegram_name', 'User')}: {data.get('interaction_count', 0)} interactions\n"
+        # Show recent users
+        recent_users = list(user_sessions.items())[-5:]  # Last 5 users
+        for user_id, data in recent_users:
+            status = "✅ Registered" if data.get('data_collected') else "🟡 Visiting"
+            stats_text += f"• {data.get('telegram_name', 'User')} - {status}\n"
         
         await update.message.reply_text(stats_text, parse_mode='Markdown')
 
     # 🏭 MAIN BOT FUNCTIONS
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("✅ GSPL Bot is running 24/7 with Dual Bot System!")
+        await update.message.reply_text("✅ GSPL Bot is running 24/7 with Report Features!")
 
     async def main_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -210,11 +218,16 @@ class GSPLDualBot:
             [InlineKeyboardButton("📞 Contact Support", callback_data="contact")],
             [InlineKeyboardButton("📋 Register for Updates", callback_data="register")]
         ]
+        
+        # Add admin button if owner
+        if isinstance(update, Update) and str(update.effective_user.id) == OWNER_CHAT_ID:
+            keyboard.append([InlineKeyboardButton("🔒 Admin Report", callback_data="admin_report")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         welcome_text = """🏭 **Welcome to Goa Sponge & Power Limited**
 
-*24/7 Official Assistant - Dual Bot System*
+*24/7 Official Assistant*
 
 📍 **Headquarters:** Goa, India
 🏭 **Industry:** Steel & Power
@@ -251,6 +264,8 @@ Choose an option below to explore:"""
             await self.show_contact(query)
         elif callback_data == "register":
             await self.start_registration(query)
+        elif callback_data == "admin_report":
+            await self.show_admin_report(query)
         elif callback_data.startswith("product_"):
             product_id = callback_data.replace("product_", "")
             await self.show_product_details(query, product_id)
@@ -258,57 +273,95 @@ Choose an option below to explore:"""
             await self.show_main_menu_from_query(query)
         elif callback_data == "back_to_products":
             await self.show_product_catalog(query)
+        elif callback_data == "report_users":
+            await self.show_users_callback(query)
+        elif callback_data == "report_stats":
+            await self.show_stats_callback(query)
+        elif callback_data == "report_myid":
+            await self.show_myid_callback(query)
 
-    async def main_message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        message_text = update.message.text
+    async def show_admin_report(self, query):
+        user_id = query.from_user.id
         
-        if user_id not in user_sessions:
-            await update.message.reply_text("Please use /start to begin.")
+        # Check if user is owner
+        if str(user_id) != OWNER_CHAT_ID:
+            await query.edit_message_text("❌ Access Denied - Owner Only")
             return
         
-        current_step = user_sessions[user_id].get('current_step')
+        keyboard = [
+            [InlineKeyboardButton("👥 Registered Users", callback_data="report_users")],
+            [InlineKeyboardButton("📊 Statistics", callback_data="report_stats")],
+            [InlineKeyboardButton("🆔 My ID", callback_data="report_myid")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
-        if current_step == 'name':
-            user_sessions[user_id]['name'] = message_text
-            user_sessions[user_id]['current_step'] = 'email'
-            await update.message.reply_text("📧 What is your email address?")
-            
-        elif current_step == 'email':
-            if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', message_text):
-                user_sessions[user_id]['email'] = message_text
-                user_sessions[user_id]['current_step'] = 'mobile'
-                await update.message.reply_text("📞 What is your mobile number?")
-            else:
-                await update.message.reply_text("❌ Please enter a valid email address.")
-                
-        elif current_step == 'mobile':
-            if re.match(r'^[6-9]\d{9}$', message_text):
-                user_sessions[user_id]['mobile'] = message_text
-                user_sessions[user_id]['data_collected'] = True
-                user_sessions[user_id]['current_step'] = None
-                
-                # Send confirmation
-                await update.message.reply_text(
-                    f"""✅ **Registration Successful!**
+        await query.edit_message_text(
+            "🔒 **Admin Report Panel**\n\nChoose an option:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
 
-Thank you {user_sessions[user_id]['name']} for registering.
+    async def show_users_callback(self, query):
+        user_id = query.from_user.id
+        
+        if str(user_id) != OWNER_CHAT_ID:
+            await query.edit_message_text("❌ Access Denied")
+            return
+        
+        if not user_sessions:
+            await query.edit_message_text("❌ No users registered yet.")
+            return
+        
+        user_list = "🔒 **Registered Users:**\n\n"
+        user_count = 0
+        
+        for uid, data in user_sessions.items():
+            if data.get('data_collected'):
+                user_count += 1
+                user_list += f"👤 **Name:** {data.get('name', 'N/A')}\n"
+                user_list += f"📞 **Mobile:** {data.get('mobile', 'N/A')}\n"
+                user_list += f"📧 **Email:** {data.get('email', 'N/A')}\n"
+                user_list += f"🆔 **TG ID:** `{uid}`\n"
+                user_list += "─" * 20 + "\n"
+        
+        user_list = f"📊 **Total Registered Users:** {user_count}\n\n" + user_list
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Reports", callback_data="admin_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(user_list, reply_markup=reply_markup, parse_mode='Markdown')
 
-We will contact you at:
-• 📧 {user_sessions[user_id]['email']}
-• 📞 {user_sessions[user_id]['mobile']}
+    async def show_stats_callback(self, query):
+        user_id = query.from_user.id
+        
+        if str(user_id) != OWNER_CHAT_ID:
+            await query.edit_message_text("❌ Access Denied")
+            return
+        
+        total_users = len(user_sessions)
+        registered_users = sum(1 for data in user_sessions.values() if data.get('data_collected'))
+        active_users = sum(1 for data in user_sessions.values() if data.get('interaction_count', 0) > 0)
+        
+        stats_text = f"""📊 **Bot Statistics**
 
-You will now receive updates about our products and services.""",
-                    parse_mode='Markdown'
-                )
-                
-                # Show main menu again
-                await self.show_main_menu(update)
-                
-            else:
-                await update.message.reply_text("❌ Please enter a valid 10-digit mobile number.")
+👥 **Total Users:** {total_users}
+✅ **Registered Users:** {registered_users}
+🎯 **Active Users:** {active_users}"""
 
-    # ... (rest of the main bot functions same as before - show_company_info, show_product_catalog, etc.)
+        keyboard = [[InlineKeyboardButton("🔙 Back to Reports", callback_data="admin_report")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    async def show_myid_callback(self, query):
+        user_id = query.from_user.id
+        await query.edit_message_text(f"🆔 Your Chat ID: `{user_id}`", parse_mode='Markdown')
+
+    # ... (REST OF THE FUNCTIONS SAME AS BEFORE - show_company_info, show_product_catalog, etc.)
+    # Copy all the other functions from previous code (show_company_info, show_product_catalog, 
+    # show_product_details, show_directors, show_financial_info, show_media, show_contact, 
+    # start_registration, main_message_handler, show_main_menu_from_query)
 
     async def show_company_info(self, query):
         company_text = """🏭 **Goa Sponge & Power Limited**
@@ -483,6 +536,55 @@ Use the registration form for detailed quotes."""
             parse_mode='Markdown'
         )
 
+    async def main_message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        message_text = update.message.text
+        
+        if user_id not in user_sessions:
+            await update.message.reply_text("Please use /start to begin.")
+            return
+        
+        current_step = user_sessions[user_id].get('current_step')
+        
+        if current_step == 'name':
+            user_sessions[user_id]['name'] = message_text
+            user_sessions[user_id]['current_step'] = 'email'
+            await update.message.reply_text("📧 What is your email address?")
+            
+        elif current_step == 'email':
+            if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', message_text):
+                user_sessions[user_id]['email'] = message_text
+                user_sessions[user_id]['current_step'] = 'mobile'
+                await update.message.reply_text("📞 What is your mobile number?")
+            else:
+                await update.message.reply_text("❌ Please enter a valid email address.")
+                
+        elif current_step == 'mobile':
+            if re.match(r'^[6-9]\d{9}$', message_text):
+                user_sessions[user_id]['mobile'] = message_text
+                user_sessions[user_id]['data_collected'] = True
+                user_sessions[user_id]['current_step'] = None
+                
+                # Send confirmation
+                await update.message.reply_text(
+                    f"""✅ **Registration Successful!**
+
+Thank you {user_sessions[user_id]['name']} for registering.
+
+We will contact you at:
+• 📧 {user_sessions[user_id]['email']}
+• 📞 {user_sessions[user_id]['mobile']}
+
+You will now receive updates about our products and services.""",
+                    parse_mode='Markdown'
+                )
+                
+                # Show main menu again
+                await self.show_main_menu(update)
+                
+            else:
+                await update.message.reply_text("❌ Please enter a valid 10-digit mobile number.")
+
     async def show_main_menu_from_query(self, query):
         keyboard = [
             [InlineKeyboardButton("🏭 Company Overview", callback_data="company_info")],
@@ -493,47 +595,26 @@ Use the registration form for detailed quotes."""
             [InlineKeyboardButton("📞 Contact Support", callback_data="contact")],
             [InlineKeyboardButton("📋 Register for Updates", callback_data="register")]
         ]
+        
+        # Add admin button if owner
+        if str(query.from_user.id) == OWNER_CHAT_ID:
+            keyboard.append([InlineKeyboardButton("🔒 Admin Report", callback_data="admin_report")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         welcome_text = """🏭 **Welcome to Goa Sponge & Power Limited**
 
-*24/7 Official Assistant - Dual Bot System*
+*24/7 Official Assistant*
 
 Choose an option below to explore:"""
         
         await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-    def run_dual_bots(self):
-        """Run both bots in separate threads"""
-        print("🚀 Starting GSPL Dual Bot System...")
-        
-        def run_main_bot():
-            logger.info("🏭 Main Bot Starting...")
-            self.main_app.run_polling()
-            
-        def run_report_bot():
-            logger.info("🔒 Report Bot Starting...")
-            self.report_app.run_polling()
-        
-        # Run in separate threads
-        main_thread = threading.Thread(target=run_main_bot, daemon=True)
-        report_thread = threading.Thread(target=run_report_bot, daemon=True)
-        
-        main_thread.start()
-        report_thread.start()
-        
-        print("✅ GSPL Dual Bot System Successfully Started!")
-        print("🏭 Main Bot: Running")
-        print("🔒 Report Bot: Running")
-        print("🌐 24/7 Service: ACTIVE")
-        
-        # Keep main thread alive
-        try:
-            while True:
-                time.sleep(60)
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
+    def run_bot(self):
+        print("🚀 Starting GSPL Bot with Report Features...")
+        logger.info("🤖 GSPL Bot Started Successfully!")
+        self.app.run_polling()
 
 if __name__ == "__main__":
-    bot = GSPLDualBot()
-    bot.run_dual_bots()
+    bot = GSPLBot()
+    bot.run_bot()
